@@ -1,0 +1,797 @@
+import React, { useState, useEffect } from "react";
+import { useParams, useNavigate } from "react-router-dom";
+import { getOptimizedImage } from "../../utils/imageOptimization";
+import {
+  ArrowLeft,
+  Instagram,
+  Youtube,
+  Twitter,
+  Linkedin,
+  Globe,
+  MapPin,
+  Calendar,
+  ShieldCheck,
+  Users,
+  ExternalLink,
+  MessageSquare,
+  Send,
+  AlertCircle,
+  ShieldClose,
+  Star,
+  Briefcase,
+  TrendingUp,
+  Edit3,
+  LayoutDashboard,
+  CheckCircle,
+  Download,
+  Eye,
+  X,
+  Link as LinkIcon,
+  FolderOpen,
+  FileText,
+} from "lucide-react";
+import api from "../../services/api";
+import collaborationService from "../../services/collaborationService";
+import SendCollabModal from "../../components/layout/influencer/SendCollabModal";
+import { cn } from "../../utils/helper";
+import VerifiedTick from "../../components/common/VerifiedTick";
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
+
+const formatJoinDate = (dateStr) => {
+  if (!dateStr) return "—";
+  return new Date(dateStr).toLocaleDateString("en-US", {
+    month: "long",
+    year: "numeric",
+  });
+};
+
+const SocialIcon = ({ name, size = 16, className }) => {
+  const map = {
+    instagram: Instagram,
+    tiktok: ({ size, className }) => (
+      <svg
+        viewBox="0 0 24 24"
+        width={size}
+        height={size}
+        className={className}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M9 12a4 4 0 1 0 4 4V4a5 5 0 0 0 5 5" />
+      </svg>
+    ),
+    twitter: Twitter,
+    linkedin: Linkedin,
+    youtube: Youtube,
+  };
+  const Icon = map[name?.toLowerCase()] || Globe;
+  return <Icon size={size} className={className} />;
+};
+
+const SectionHeader = ({ title, icon: Icon, color = "blue" }) => (
+  <h3 className="text-lg font-black text-slate-900 mb-6 flex items-center gap-3 tracking-tight">
+    <div
+      className={cn(
+        "w-8 h-8 rounded-xl flex items-center justify-center text-white shadow-lg shadow-slate-200",
+        `bg-${color}-600`,
+      )}
+    >
+      <Icon size={16} />
+    </div>
+    {title}
+  </h3>
+);
+
+// ── Main Component ─────────────────────────────────────────────────────────────
+
+const InfluencerProfile = () => {
+  const { influencerId } = useParams();
+  const navigate = useNavigate();
+
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [showModal, setShowModal] = useState(false);
+  const [activeTab, setActiveTab] = useState("about");
+  const [activeCollab, setActiveCollab] = useState(null);
+  const [isRequested, setIsRequested] = useState(false);
+  const [previewItem, setPreviewItem] = useState(null);
+
+  const handleDownload = async (url, title, type) => {
+    if (type === "link") {
+      window.open(url, "_blank", "noopener,noreferrer");
+      return;
+    }
+    
+    try {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+      
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = title || "portfolio-item";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (error) {
+      console.error("Download failed, falling back to new tab:", error);
+      window.open(url, "_blank");
+    }
+  };
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await api.get(`/brands/influencers/${influencerId}`);
+        if (res.data?.success) {
+          setData(res.data.data);
+
+          // Check for active collaboration using the user ID
+          const userId = res.data.data.influencer?.user?._id;
+          if (userId) {
+            try {
+              const collabRes = await collaborationService.getLatestWithUser(userId);
+              if (collabRes.success && collabRes.data) {
+                if (collabRes.data.status === 'active') {
+                  setActiveCollab(collabRes.data);
+                } else if (collabRes.data.status === 'pending') {
+                  setIsRequested(true);
+                }
+              }
+            } catch (collabErr) {
+              console.error("No active collaboration found:", collabErr);
+            }
+          }
+        } else {
+          setError("Failed to load influencer profile.");
+        }
+      } catch (err) {
+        console.error("Error loading influencer profile:", err);
+        setError(
+          err.response?.data?.message || "Failed to load influencer profile.",
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+    if (influencerId) load();
+  }, [influencerId]);
+
+  if (loading) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
+        <div className="w-12 h-12 border-4 border-slate-900 border-t-transparent rounded-full animate-spin" />
+        <p className="text-slate-400 font-black uppercase text-[10px] tracking-widest animate-pulse">
+          Fetching Influencer Data...
+        </p>
+      </div>
+    );
+  }
+
+  if (error || !data) {
+    return (
+      <div className="max-w-[1100px] mx-auto w-full pb-10">
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-5 transition-colors font-medium"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <div className="bg-red-50 border border-red-100 rounded-xl p-6 flex items-start gap-4 text-red-700">
+          <AlertCircle className="w-5 h-5 shrink-0 mt-0.5" />
+          <p className="font-medium">
+            {error || "Influencer profile not found"}
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  const { influencer, totalFollowers } = data || {};
+  const user = influencer?.user || {};
+
+  // ── DEACTIVATED ─────────────────────────────────────────────────────────────
+  if (user?.isDeactivated) {
+    return (
+      <div className="max-w-[1100px] mx-auto w-full pb-10 px-4">
+        <button
+          onClick={() => navigate(-1)}
+          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-5 transition-colors font-medium"
+        >
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <div className="bg-slate-50 border border-slate-100 rounded-[3rem] p-16 flex flex-col items-center text-center gap-4">
+          <div className="w-20 h-20 bg-white rounded-full shadow-lg flex items-center justify-center mb-4">
+            <ShieldClose size={32} className="text-slate-300" />
+          </div>
+          <h2 className="text-2xl font-black text-slate-900 tracking-tight">
+            Account Deactivated
+          </h2>
+          <p className="text-slate-500 max-w-sm mb-6 font-medium leading-relaxed">
+            This influencer has temporarily deactivated their account. They will
+            be back soon!
+          </p>
+          <button
+            onClick={() => navigate("/brand/search")}
+            className="px-8 py-3 bg-slate-900 text-white rounded-2xl text-sm font-bold shadow-xl shadow-slate-200"
+          >
+            Find Other Influencers
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const name = user?.fullname || influencer?.username || "Influencer";
+  const avatar =
+    user?.profilePic ||
+    influencer?.profilePicture ||
+    `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random&size=200`;
+  const cover =
+    user?.coverPic ||
+    influencer?.coverImage ||
+    "https://images.unsplash.com/photo-1557683316-973673baf926?auto=format&fit=crop&q=80&w=2000";
+
+  return (
+    <div className="max-w-6xl mx-auto space-y-10 pb-24 animate-in fade-in duration-700 px-4 md:px-8">
+      {/* ── HEADER ACTIONS ── */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+        <div>
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-2 text-xs font-black text-slate-400 uppercase tracking-widest hover:text-slate-900 transition-colors mb-4 border-none"
+          >
+            <ArrowLeft className="w-4 h-4" /> Back to Search
+          </button>
+          <div className="flex items-center gap-1">
+            <h1 className="text-4xl font-black text-slate-900 tracking-tight italic uppercase">
+              {name}
+            </h1>
+            <VerifiedTick user={user} roleProfile={influencer} size="lg" />
+          </div>
+        </div>
+        <div className="flex items-center gap-3">
+          {activeCollab ? (
+            <button
+              onClick={() => navigate(`/brand/collaboration/${activeCollab._id}`)}
+              className="px-6 py-3 bg-indigo-600 border border-indigo-700 text-white rounded-2xl text-xs font-black uppercase tracking-widest hover:bg-indigo-700 transition-all flex items-center gap-2 shadow-sm shadow-indigo-100"
+            >
+              <LayoutDashboard size={14} /> Collaborate
+            </button>
+          ) : isRequested ? (
+            <div className="px-6 py-3 bg-emerald-50 border border-emerald-200 text-emerald-600 rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center gap-2 shadow-sm">
+              <CheckCircle size={14} className="text-emerald-500" /> Requested
+            </div>
+          ) : (
+            <button
+              onClick={() => setShowModal(true)}
+              className="px-8 py-3 bg-[#1A73E8] text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-2xl shadow-blue-100 hover:bg-[#1557B0] transition-all flex items-center gap-2.5 active:scale-95 border-none"
+            >
+              <Send size={14} /> Send Collab Request
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── HERO BANNER ── */}
+      <div className="bg-white rounded-[3rem] border border-slate-100 shadow-2xl shadow-slate-200/40 overflow-hidden group/card relative">
+        <div className="h-56 bg-slate-100 relative group/cover cursor-default">
+          <img loading="lazy" decoding="async"             src={getOptimizedImage(cover, 'cover')}
+            alt="Cover"
+            className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover/card:scale-105"
+            width="1200" height="224" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent opacity-60" />
+        </div>
+
+        <div className="px-12 pb-12">
+          <div className="flex flex-col md:flex-row items-end gap-12 -mt-16 relative z-10">
+            <div className="relative group/logo">
+              <img loading="lazy" decoding="async"                 src={getOptimizedImage(avatar, 'avatar')}
+                alt="Avatar"
+                className="w-44 h-44 rounded-[2.5rem] object-cover border-[10px] border-white shadow-2xl bg-white"
+               width="176" height="176" />
+              <VerifiedTick
+                user={user}
+                roleProfile={influencer}
+                size="md"
+                className="absolute -bottom-2 -right-2 bg-blue-600 p-2.5 rounded-full text-white shadow-lg border-4 border-white ml-0"
+              />
+            </div>
+
+            <div className="flex-1 pb-4 space-y-6">
+              <div className="flex flex-wrap items-center gap-10 pt-8">
+                {/* Location */}
+                <div className="flex items-center gap-3.5 group/info">
+                  <div className="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600 transition-all group-hover/info:scale-110 shadow-sm border border-blue-100/50">
+                    <MapPin size={16} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-0.5">
+                      Location
+                    </p>
+                    <div className="text-sm font-black text-slate-800">
+                      {influencer.location || "Earth"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Category */}
+                <div className="flex items-center gap-3.5 group/info">
+                  <div className="w-10 h-10 rounded-2xl bg-orange-50 flex items-center justify-center text-orange-600 transition-all group-hover/info:scale-110 shadow-sm border border-orange-100/50">
+                    <Briefcase size={16} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-0.5">
+                      Niche
+                    </p>
+                    <div className="text-sm font-black text-slate-800 capitalize">
+                      {influencer.category || "Influencer"}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Joined */}
+                <div className="flex items-center gap-3.5 group/info">
+                  <div className="w-10 h-10 rounded-2xl bg-emerald-50 flex items-center justify-center text-emerald-600 transition-all group-hover/info:scale-110 shadow-sm border border-emerald-100/50">
+                    <Calendar size={16} />
+                  </div>
+                  <div className="text-left">
+                    <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-0.5">
+                      Partner Since
+                    </p>
+                    <div className="text-sm font-black text-slate-800">
+                      {formatJoinDate(user.createdAt)}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Portfolio */}
+                {Array.isArray(influencer.portfolio) && influencer.portfolio.length > 0 && (
+                  <div className="flex items-center gap-3.5 group/info">
+                    <div className="w-10 h-10 rounded-2xl bg-violet-50 flex items-center justify-center text-violet-600 transition-all group-hover/info:scale-110 shadow-sm border border-violet-100/50">
+                      <FolderOpen size={16} />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest mb-0.5">
+                        Portfolio
+                      </p>
+                      <button
+                        onClick={() => setActiveTab("portfolio")}
+                        className="text-sm font-black text-violet-600 hover:underline"
+                      >
+                        {influencer.portfolio.length} {influencer.portfolio.length === 1 ? "Item" : "Items"}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 px-0">
+        {/* LEFT COLUMN: STATS & SOCIALS */}
+        <div className="lg:col-span-4 space-y-8 animate-in slide-in-from-left-4 duration-1000">
+          {/* CORE METRICS */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 p-10 shadow-2xl shadow-slate-200/30 space-y-10 group">
+            <h3 className="text-sm font-black text-slate-900 tracking-widest uppercase flex items-center gap-3 text-left">
+              <TrendingUp size={16} className="text-blue-600" /> Platform
+              Insights
+            </h3>
+            <div className="space-y-8">
+              <div className="flex items-center gap-6 group/stat">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-blue-600 bg-blue-50 group-hover/stat:scale-110 transition-all duration-500 shadow-sm">
+                  <Users size={20} />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1 leading-none">
+                    Total Reach
+                  </p>
+                  <p className="text-lg font-black text-slate-900 tracking-tight italic">
+                    {(totalFollowers || 0).toLocaleString()}+
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-6 group/stat">
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-orange-600 bg-orange-50 group-hover/stat:scale-110 transition-all duration-500 shadow-sm">
+                  <Star size={20} />
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] mb-1 leading-none">
+                    Avg Rating
+                  </p>
+                  <p className="text-lg font-black text-slate-900 tracking-tight italic">
+                    {influencer.averageRating || "0.0"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* DIGITAL ECOSYSTEM */}
+          <div className="bg-white rounded-[2.5rem] border border-slate-100 p-10 shadow-2xl shadow-slate-200/30 space-y-8">
+            <h3 className="text-sm font-black text-slate-900 tracking-widest uppercase flex items-center gap-3 text-left">
+              <Globe size={16} className="text-emerald-600" /> Digital Ecosystem
+            </h3>
+            <div className="flex flex-col gap-4">
+              {(Array.isArray(user?.verifiedPlatforms) ? user.verifiedPlatforms : []).map((platformData) => {
+                if (!platformData || !platformData.platform || !platformData.verified) return null;
+                const platform = platformData.platform;
+                
+                const knownPlatforms = {
+                  instagram: { label: "Instagram", name: "INSTAGRAM", color: "pink" },
+                  tiktok: { label: "TikTok", name: "TIKTOK", color: "slate" },
+                  twitter: { label: "Twitter", name: "TWITTER", color: "blue" },
+                  youtube: { label: "YouTube", name: "YOUTUBE", color: "red" },
+                  linkedin: { label: "LinkedIn", name: "LINKEDIN", color: "indigo" },
+                  facebook: { label: "Facebook", name: "FACEBOOK", color: "blue" }
+                };
+
+                const social = knownPlatforms[platform.toLowerCase()] || {
+                  label: platform.charAt(0).toUpperCase() + platform.slice(1),
+                  name: platform.toUpperCase(),
+                  color: "slate"
+                };
+
+                const displayValue = platformData.username || platformData.handle || platformData.platformUserId || platformData.profileUrl || "Connected";
+                const linkUrl = platformData.profileUrl || (displayValue.startsWith("http") ? displayValue : `https://${platform}.com/${displayValue.replace("@", "")}`);
+
+                return (
+                  <div
+                    key={platform}
+                    className="flex items-center justify-between p-4 bg-slate-50/50 rounded-2xl border border-transparent hover:border-slate-100 hover:bg-slate-50 transition-all group/soc"
+                  >
+                    <div className="flex items-center gap-3.5 text-left">
+                      <div
+                        className={cn(
+                          `w-9 h-9 rounded-xl flex items-center justify-center bg-white shadow-sm transition-transform group-hover/soc:rotate-6`,
+                          social.color === "pink" ? "text-pink-600" :
+                          social.color === "blue" ? "text-blue-600" :
+                          social.color === "red" ? "text-red-600" :
+                          social.color === "indigo" ? "text-indigo-600" : "text-slate-900"
+                        )}
+                      >
+                        <SocialIcon name={platform} size={16} />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-1.5 mb-1.5">
+                          <p className="text-[10px] font-black text-slate-400 tracking-widest leading-none uppercase">
+                            {social.name}
+                          </p>
+                          <div className="px-1 py-0.5 bg-emerald-50 text-emerald-600 rounded text-[7px] font-black uppercase tracking-tighter">
+                            Verified
+                          </div>
+                        </div>
+                        <p className="text-xs font-bold text-slate-600">
+                          {displayValue.startsWith("http") ? "Profile" : (displayValue.startsWith("@") ? displayValue : `@${displayValue}`)}
+                        </p>
+                      </div>
+                    </div>
+                    {linkUrl && (
+                      <a
+                        href={linkUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="w-8 h-8 rounded-lg bg-slate-200/50 flex items-center justify-center text-slate-400 hover:bg-blue-600 hover:text-white transition-all border-none"
+                      >
+                        <ExternalLink size={12} />
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+              {(!user?.verifiedPlatforms || !Array.isArray(user.verifiedPlatforms) || user.verifiedPlatforms.length === 0) && (
+                <div className="py-12 text-center bg-slate-50/50 rounded-2xl border-2 border-dashed border-slate-100">
+                  <p className="text-[10px] font-black text-slate-300 uppercase tracking-widest italic">
+                    No verified platforms linked.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* RIGHT COLUMN: CONTENT AREAS */}
+        <div className="lg:col-span-8 space-y-8 animate-in slide-in-from-right-4 duration-1000">
+          <div className="bg-white rounded-[3rem] border border-slate-100 shadow-2xl shadow-slate-200/30 overflow-hidden flex flex-col h-full">
+            <div className="border-b border-slate-50 px-10 flex gap-8 bg-slate-50/10">
+              {["about", "portfolio", "collaborations", "reviews"].map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={cn(
+                    "py-6 text-xs font-black uppercase tracking-[0.2em] border-b-[3px] transition-all relative outline-none",
+                    activeTab === tab
+                      ? "border-slate-900 text-slate-900"
+                      : "border-transparent text-slate-400 hover:text-slate-600",
+                  )}
+                >
+                  {tab === "about"
+                    ? "Strategic Bio"
+                    : tab === "portfolio"
+                      ? "Portfolio"
+                      : tab === "collaborations"
+                        ? "Collaborations"
+                        : "Brand Feedback"}
+                </button>
+              ))}
+            </div>
+
+            <div className="p-12 flex-1">
+              {activeTab === "about" && (
+                <div className="space-y-6 animate-in fade-in zoom-in-95 duration-500 text-left">
+                  <SectionHeader title="The Narrative" icon={Edit3} />
+                  <p className="text-slate-600 leading-relaxed font-medium pl-6 border-l-4 border-slate-100 whitespace-pre-wrap text-base">
+                    {influencer.about || "Biography under review."}
+                  </p>
+                </div>
+              )}
+
+              {activeTab === "portfolio" && (
+                <div className="space-y-6 animate-in fade-in zoom-in-95 duration-500">
+                  <SectionHeader title="Portfolio" icon={FolderOpen} color="violet" />
+                  {Array.isArray(influencer.portfolio) && influencer.portfolio.length > 0 ? (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                      {influencer.portfolio.map((item, idx) => (
+                        <div
+                          key={idx}
+                          className="group bg-slate-50 hover:bg-white border border-slate-100 hover:border-violet-100 rounded-[2rem] p-6 transition-all duration-300 hover:shadow-xl hover:shadow-violet-500/10 flex flex-col gap-4"
+                        >
+                          <div className="flex items-start gap-4">
+                            <div className="w-11 h-11 rounded-2xl bg-white shadow-sm border border-slate-100 flex items-center justify-center shrink-0">
+                              {item.type === "link" ? (
+                                <LinkIcon size={18} className="text-violet-500" />
+                              ) : (
+                                <FileText size={18} className="text-blue-500" />
+                              )}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <h4 className="text-sm font-black text-slate-900 truncate tracking-tight">{item.title || "Untitled"}</h4>
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">
+                                {item.type === "link" ? "Web Link" : "File"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 mt-auto">
+                            <button
+                              onClick={() => setPreviewItem(item)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 bg-white border border-slate-200 text-slate-700 rounded-xl text-[11px] font-black uppercase tracking-wider hover:bg-violet-600 hover:text-white hover:border-violet-600 transition-all"
+                            >
+                              <Eye size={13} /> Preview
+                            </button>
+                            <button
+                              onClick={() => handleDownload(item.url, item.title, item.type)}
+                              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 px-3 bg-slate-900 text-white rounded-xl text-[11px] font-black uppercase tracking-wider hover:bg-black transition-all"
+                            >
+                              <Download size={13} /> {item.type === "link" ? "Open" : "Download"}
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="py-20 text-center bg-slate-50/50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                      <FolderOpen size={32} className="text-slate-200 mx-auto mb-3" />
+                      <p className="text-slate-400 font-black uppercase text-xs tracking-widest italic">
+                        No portfolio items shared yet.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {activeTab === "collaborations" && (
+                <div className="space-y-10 animate-in fade-in slide-in-from-bottom-4 duration-500 text-left">
+                  <SectionHeader
+                    title="Active Collaborations"
+                    icon={Briefcase}
+                    color="blue"
+                  />
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {(influencer.activeCollaborations || []).map(
+                      (collab, idx) => (
+                        <div
+                          key={idx}
+                          className="p-8 bg-slate-50/50 border border-slate-100 rounded-[2.5rem] hover:bg-white hover:shadow-2xl hover:shadow-blue-500/10 transition-all duration-500 group"
+                        >
+                          <div className="flex justify-between items-start mb-6">
+                            <div className="space-y-1 text-left">
+                              <p className="text-[10px] font-black text-blue-600 tracking-widest uppercase leading-none">
+                                Live Campaign
+                              </p>
+                              <h4 className="text-xl font-black text-slate-900 tracking-tight italic uppercase leading-tight">
+                                {collab.campaign?.name || "Untitled"}
+                              </h4>
+                              <p className="text-xs font-bold text-slate-400 italic">
+                                With{" "}
+                                {collab.sender?.fullname || "Brand Partner"}
+                              </p>
+                            </div>
+                            <span className="text-[8px] font-black uppercase tracking-widest bg-emerald-500 text-white px-3 py-1.5 rounded-xl shadow-lg shadow-emerald-200">
+                              ACTIVE
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-600 leading-relaxed font-medium line-clamp-3 mb-6">
+                            {collab.campaign?.description ||
+                              "Ongoing collaboration."}
+                          </p>
+                        </div>
+                      ),
+                    )}
+                    {(!influencer.activeCollaborations ||
+                      influencer.activeCollaborations.length === 0) && (
+                        <div className="col-span-full py-20 text-center bg-slate-50/50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                          <p className="text-slate-400 font-black uppercase text-xs tracking-widest italic">
+                            No active collaborations right now.
+                          </p>
+                        </div>
+                      )}
+                  </div>
+                </div>
+              )}
+
+              {activeTab === "reviews" && (
+                <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <SectionHeader
+                    title="Verified Feedback"
+                    icon={Star}
+                    color="yellow"
+                  />
+                  <div className="space-y-6 text-left">
+                    {(influencer.reviews || []).map((review, i) => (
+                      <div
+                        key={i}
+                        className="p-8 bg-slate-50/50 border border-slate-100 rounded-[2.5rem] flex flex-col md:flex-row gap-6 items-start group hover:bg-white hover:shadow-2xl transition-all duration-500"
+                      >
+                        <img loading="lazy" decoding="async"                           src={getOptimizedImage(
+                            review.reviewer?.profilePic ||
+                            `https://ui-avatars.com/api/?name=${review.reviewer?.fullname}`, 'avatar'
+                          )}
+                          className="w-14 h-14 rounded-2xl object-cover border-4 border-white shadow-lg"
+                          alt="Reviewer"
+                         width="56" height="56" />
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <h4 className="font-black text-slate-900 uppercase italic tracking-tight">
+                              {review.reviewer?.fullname}
+                            </h4>
+                            <div className="flex gap-0.5">
+                              {[...Array(5)].map((_, idx) => (
+                                <Star
+                                  key={idx}
+                                  size={12}
+                                  className={cn(
+                                    idx < review.rating
+                                      ? "text-yellow-500 fill-yellow-500"
+                                      : "text-slate-200",
+                                  )}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                          <p className="text-slate-600 font-medium leading-relaxed italic text-sm">
+                            "{review.comment}"
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                    {(!influencer.reviews ||
+                      influencer.reviews.length === 0) && (
+                        <div className="py-20 text-center bg-slate-50/50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                          <p className="text-slate-400 font-black uppercase text-xs tracking-widest italic">
+                            No reviews yet.
+                          </p>
+                        </div>
+                      )}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {showModal && (
+        <SendCollabModal
+          targetType="influencer"
+          targetUser={{
+            _id: user?._id || data?.influencer?.user?._id || influencerId,
+            name: name,
+          }}
+          onClose={() => setShowModal(false)}
+          onSuccess={() => setShowModal(false)}
+        />
+      )}
+
+      {/* ── Portfolio Preview Modal ── */}
+      {previewItem && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+          onClick={() => setPreviewItem(null)}
+        >
+          <div
+            className="bg-white rounded-[2.5rem] overflow-hidden w-full max-w-4xl shadow-2xl flex flex-col"
+            style={{ maxHeight: "90vh" }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between px-8 py-5 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center">
+                  {previewItem.type === "link" ? (
+                    <LinkIcon size={16} className="text-violet-500" />
+                  ) : (
+                    <FileText size={16} className="text-blue-500" />
+                  )}
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 tracking-tight">{previewItem.title || "Portfolio Item"}</h3>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{previewItem.type === "link" ? "Web Link" : "File"}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setPreviewItem(null)}
+                className="w-9 h-9 rounded-xl bg-slate-100 flex items-center justify-center text-slate-500 hover:bg-red-50 hover:text-red-500 transition-all"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {/* Modal Content */}
+            <div className="flex-grow bg-slate-900/5 overflow-hidden relative">
+              {previewItem.type === "link" ? (
+                <iframe
+                  src={previewItem.url}
+                  title={previewItem.title}
+                  className="w-full h-full border-0 bg-white"
+                  style={{ minHeight: "70vh" }}
+                  sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center p-4" style={{ minHeight: "70vh" }}>
+                  {previewItem.url.match(/\.(jpeg|jpg|gif|png|webp|svg)$/i) ? (
+                    <img loading="lazy" decoding="async" 
+                      src={getOptimizedImage(previewItem.url, 'portfolioFull')} 
+                      alt={previewItem.title} 
+                      className="max-w-full max-h-[85vh] object-contain rounded-2xl shadow-2xl"
+                      width="1200" height="800" />
+                  ) : (
+                    <iframe
+                      src={previewItem.url}
+                      title={previewItem.title}
+                      className="w-full h-full border-0 bg-white rounded-lg shadow-sm"
+                      style={{ minHeight: "70vh" }}
+                    />
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 bg-white border-t border-slate-100 flex justify-between items-center px-8">
+              <p className="text-xs text-slate-400 font-medium italic">
+                {previewItem.type === "link" ? "External content may have restrictions." : "Portfolio file preview."}
+              </p>
+              <button
+                onClick={() => handleDownload(previewItem.url, previewItem.title, previewItem.type)}
+                className="flex items-center gap-2 px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 transition-all shadow-lg shadow-blue-200"
+              >
+                <Download size={16} /> {previewItem.type === "link" ? "Open Link" : "Download File"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default InfluencerProfile;

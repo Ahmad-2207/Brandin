@@ -1,0 +1,194 @@
+import { Server } from "socket.io";
+import jwt from "jsonwebtoken";
+import User from "../modules/user/user.model.js";
+import { socketManager } from "./socketManager.js";
+
+const initializeSocket = (httpServer, app) => {
+    const allowedSocketOrigins = [
+        "http://localhost:5173", 
+        "http://localhost:3000", 
+        "http://127.0.0.1:5173", 
+        "http://127.0.0.1:3000", 
+        process.env.CORS_ORIGIN
+    ].filter(Boolean);
+
+    const io = new Server(httpServer, {
+        cors: {
+            origin: function (origin, callback) {
+                if (!origin || allowedSocketOrigins.includes(origin) || origin.endsWith('.vercel.app')) {
+                    callback(null, true);
+                } else {
+                    callback(new Error('Not allowed by CORS'));
+                }
+            },
+            credentials: true
+        },
+        transports: ['websocket', 'polling'],
+        pingTimeout: 60000,
+        pingInterval: 25000,
+        connectTimeout: 45000,
+        allowEIO3: true
+    });
+
+    socketManager.init(io);
+
+    // Socket.io Authentication Middleware
+    io.use((socket, next) => {
+        try {
+            // Check auth token or cookies
+            const token = socket.handshake.auth?.token || 
+                         socket.handshake.headers.cookie?.split('accessToken=')[1]?.split(';')[0];
+            
+            if (!token) {
+                return next(new Error("Authentication error: No token provided"));
+            }
+
+            const decoded = jwt.verify(token, process.env.ACCESS_TOKEN_SECRET);
+            socket.userId = decoded._id;
+            next();
+        } catch (err) {
+            console.error("Socket Auth Error:", err.message);
+            next(new Error("Authentication error: Invalid token"));
+        }
+    });
+
+    const onlineUsers = new Map(); // socketId -> userId
+    const disconnectTimeouts = new Map(); // userId -> timeoutId
+
+    io.on("connection", (socket) => {
+        console.log("Connected to socket.io", socket.id, "User:", socket.userId);
+
+        socket.on("setup", async () => {
+            const userId = socket.userId;
+            if (!userId) return;
+
+            socket.join(userId);
+            onlineUsers.set(socket.id, userId);
+
+            // If there was a pending disconnect for this user, clear it
+            if (disconnectTimeouts.has(userId)) {
+                clearTimeout(disconnectTimeouts.get(userId));
+                disconnectTimeouts.delete(userId);
+            }
+
+            // Check DB status to see if they were manually offline
+            try {
+                const user = await User.findById(userId);
+                if (user && !user.manualOffline) {
+                    await User.findByIdAndUpdate(userId, { status: "active", lastActive: new Date() });
+                    socket.broadcast.emit("user_status_changed", { userId, status: "active", lastActive: new Date() });
+                } else if (user && user.manualOffline) {
+                    socket.broadcast.emit("user_status_changed", { userId, status: "offline", lastActive: user.lastActive });
+                }
+            } catch (error) {
+                console.error("Error in socket setup:", error);
+            }
+
+            socket.emit("connected");
+        });
+
+        socket.on("join chat", (room) => {
+            socket.join(room);
+            console.log("User Joined Room: " + room);
+        });
+
+        socket.on("typing", (room) => socket.in(room).emit("typing", room));
+        socket.on("stop typing", (room) => socket.in(room).emit("stop typing", room));
+
+        socket.on("new message", (newMessageRecieved) => {
+            const chat = newMessageRecieved.conversationId;
+            if (!chat) return console.log("chat not defined for message");
+
+            // 1. Emit to the conversation room (for the active chat window)
+            socket.in(chat).emit("message recieved", newMessageRecieved);
+
+            // 2. Emit to individual participant rooms (for sidebar updates)
+            if (newMessageRecieved.participants) {
+                newMessageRecieved.participants.forEach(participantId => {
+                    const pId = typeof participantId === 'object' ? participantId._id : participantId;
+                    if (String(pId) !== String(newMessageRecieved.sender._id)) {
+                        socket.in(String(pId)).emit("message recieved", newMessageRecieved);
+                    }
+                });
+            }
+        });
+
+        socket.on("message updated", (updatedMessage) => {
+            const chat = updatedMessage.conversationId;
+            if (!chat) return;
+
+            // Broadcast the update to the conversation room
+            socket.in(chat).emit("message updated", updatedMessage);
+            
+            // Also notify individual participant rooms for sidebars/notifications if needed
+            if (updatedMessage.participants) {
+                updatedMessage.participants.forEach(participantId => {
+                    const pId = typeof participantId === 'object' ? participantId._id : participantId;
+                    if (String(pId) !== String(updatedMessage.sender?._id || updatedMessage.sender)) {
+                        socket.in(String(pId)).emit("message updated", updatedMessage);
+                    }
+                });
+            }
+        });
+
+        socket.on("message deleted", ({ messageId, conversationId, participants }) => {
+            if (!conversationId) return;
+
+            // Broadcast deletion to the conversation room
+            socket.in(conversationId).emit("message deleted", { messageId, conversationId });
+
+            // Notify participants individual rooms
+            if (participants) {
+                participants.forEach(participantId => {
+                    const pId = typeof participantId === 'object' ? participantId._id : participantId;
+                    socket.in(pId).emit("message deleted", { messageId, conversationId });
+                });
+            }
+        });
+
+        socket.on("mark as read", ({ conversationId, userId }) => {
+            if (!conversationId) return;
+            socket.in(conversationId).emit("messages read", { conversationId, readBy: userId });
+        });
+
+        socket.on("disconnect", async () => {
+            console.log("SOCKET DISCONNECTED", socket.id);
+            const userId = onlineUsers.get(socket.id);
+
+            if (userId) {
+                onlineUsers.delete(socket.id);
+
+                // Count active sockets for this user
+                let activeSocketsCount = 0;
+                for (let [sId, uId] of onlineUsers.entries()) {
+                    if (uId === userId) {
+                        activeSocketsCount++;
+                    }
+                }
+
+                if (activeSocketsCount === 0) {
+                    // All tabs closed - Add a grace period
+                    const timeoutId = setTimeout(async () => {
+                        try {
+                            const user = await User.findById(userId);
+                            if (user) {
+                                const lastActiveTime = new Date();
+                                await User.findByIdAndUpdate(userId, { status: "offline", lastActive: lastActiveTime });
+                                socket.broadcast.emit("user_status_changed", { userId, status: "offline", lastActive: lastActiveTime });
+                            }
+                        } catch (error) {
+                            console.error("Error in socket disconnect timeout:", error);
+                        }
+                        disconnectTimeouts.delete(userId);
+                    }, 5000);
+
+                    disconnectTimeouts.set(userId, timeoutId);
+                }
+            }
+        });
+    });
+
+    return io;
+};
+
+export default initializeSocket;

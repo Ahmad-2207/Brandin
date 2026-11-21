@@ -1,0 +1,270 @@
+import mongoose, { Schema } from "mongoose";
+
+const deliverableSchema = new Schema(
+    {
+        title: {
+            type: String,
+            required: [true, "Deliverable title is required"],
+            trim: true,
+        },
+        platform: {
+            type: String,
+            enum: ["instagram", "youtube", "tiktok", "twitter", "linkedin", "facebook", "other"],
+            required: [true, "Platform is required"],
+        },
+        description: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        dueDate: {
+            type: Date,
+            required: [true, "Due date is required"],
+        },
+        status: {
+            type: String,
+            enum: ["PENDING", "IN_PROGRESS", "SUBMITTED", "APPROVED", "DELIVERED", "REVISION_REQUESTED"],
+            default: "PENDING",
+        },
+        paymentStatus: {
+            type: String,
+            enum: ["unpaid", "paid", "paymentPending"],
+            default: "unpaid",
+        },
+        stripeTransferId: {
+            type: String,
+        },
+        submissionFiles: {
+            type: [String],
+            default: [],
+        },
+        revisionNotes: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        inProgressAt: {
+            type: Date,
+            default: null,
+        },
+        submittedAt: {
+            type: Date,
+            default: null,
+        },
+        approvedAt: {
+            type: Date,
+            default: null,
+        },
+        allocatedBudget: {
+            type: Number,
+            default: 0,
+        },
+        isFinal: {
+            type: Boolean,
+            default: false,
+        },
+        isAdditional: {
+            type: Boolean,
+            default: false,
+        }
+    },
+    { _id: true }
+);
+
+const collaborationSchema = new Schema(
+    {
+        brand: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
+            required: true,
+            index: true,
+        },
+        influencer: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
+            required: true,
+            index: true,
+        },
+        campaign: {
+            type: Schema.Types.ObjectId,
+            ref: "Campaign",
+            required: true,
+        },
+        sender: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
+            required: true,
+        },
+        initiatedBy: {
+            type: String,
+            enum: ["brand", "influencer"],
+        },
+        note: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        deliveryDays: {
+            type: Number,
+            default: null,
+        },
+        totalPaidAmount: {
+            type: Number,
+            default: 0,
+        },
+        escrowFunded: {
+            type: Boolean,
+            default: false,
+        },
+        totalFundedAmount: {
+            type: Number,
+            default: 0,
+        },
+        stripePaymentIntentId: {
+            type: String,
+        },
+        fundingHistory: [{
+            amount: Number,
+            paymentIntentId: String,
+            fundedAt: { type: Date, default: Date.now }
+        }],
+        refundHistory: [{
+            amount: Number,
+            refundId: String,
+            createdAt: { type: Date, default: Date.now }
+        }],
+        title: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        description: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        agreedBudget: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        proposedBudget: {
+            type: Number,
+            min: 0,
+        },
+        currency: {
+            type: String,
+            default: "USD",
+            trim: true,
+        },
+        deliverables: {
+            type: [deliverableSchema],
+            default: [],
+        },
+        attachments: {
+            type: [String],
+            default: [],
+        },
+        notes: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        status: {
+            type: String,
+            enum: ["requested", "rejected", "awaiting_onboarding", "awaiting_funds", "active", "in_progress", "review", "completed", "suspended", "cancelled"],
+            default: "requested",
+            index: true,
+        },
+        review: {
+            type: Schema.Types.ObjectId,
+            ref: "Review",
+        },
+        influencerReview: {
+            type: Schema.Types.ObjectId,
+            ref: "Review",
+        },
+        actionRequest: {
+            type: {
+                type: String,
+                enum: ["CANCEL", "COMPLETE", "ADD_TASKS", "NONE"],
+                default: "NONE"
+            },
+            requestedBy: { type: Schema.Types.ObjectId, ref: "User" },
+            reason: { type: String, trim: true },
+            status: {
+                type: String,
+                enum: ["PENDING", "APPROVED", "REJECTED", "IDLE"],
+                default: "IDLE"
+            },
+            requestedAt: { type: Date },
+            proposedTasks: {
+                type: [deliverableSchema],
+                default: []
+            }
+        },
+        cancellationReason: {
+            type: String,
+            trim: true,
+            default: null,
+        },
+        cancelledBy: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
+            default: null,
+        },
+        completedAt: {
+            type: Date,
+            default: null,
+        },
+        completedBy: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
+            default: null,
+        },
+        startDate: {
+            type: Date,
+            default: Date.now,
+        },
+        endDate: {
+            type: Date,
+            default: null,
+        },
+        isDeleted: {
+            type: Boolean,
+            default: false,
+        },
+        deletedAt: {
+            type: Date,
+            default: null,
+        },
+        brandAgreed: {
+            type: Boolean,
+            default: false,
+        },
+        influencerAgreed: {
+            type: Boolean,
+            default: false,
+        },
+        agreedAt: {
+            type: Date,
+            default: null,
+        }
+    },
+    {
+        timestamps: true,
+    }
+);
+
+collaborationSchema.index({ brand: 1, influencer: 1 });
+collaborationSchema.index({ brand: 1, status: 1 });
+collaborationSchema.index({ influencer: 1, status: 1 });
+collaborationSchema.index({ isDeleted: 1, createdAt: -1 });
+
+// Optimization Compound Indexes for Heavy Queries
+collaborationSchema.index({ brand: 1, isDeleted: 1, createdAt: -1 });
+collaborationSchema.index({ influencer: 1, isDeleted: 1, createdAt: -1 });
+collaborationSchema.index({ campaign: 1, status: 1 });
+
+const Collaboration = mongoose.model("Collaboration", collaborationSchema);
+export default Collaboration;
